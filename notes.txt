@@ -1,0 +1,15 @@
+
+Sticky:
+	- Written in Python
+	- Write a text file, so that I can display it on stream
+	- REPL:
+		- add <title>
+		- mark <??>
+		- delete <??>
+		- exit
+	- Save checklist into a file, to be loaded later
+
+	- BruhHax thought of a command that seperates higher priority tasks and splits a checklist into two
+		- Lesser stuff into one and more important stuff into another
+
+readline in python: https://docs.python.org/3/library/readline.html
