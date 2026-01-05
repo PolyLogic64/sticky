@@ -4,6 +4,8 @@ import logging
 from pathlib import Path
 from dataclasses import dataclass
 
+ItemDict = dict[str, str | bool]
+
 
 @dataclass(kw_only=True)
 class Item:
@@ -11,85 +13,147 @@ class Item:
     done: bool = False
 
 
-def actual_main(checklistPath):
+def item_to_string(item: Item) -> str:
+    if item.done:
+        mark = "x"
+    else:
+        mark = " "
+    return f"[{mark}] {item.title}"
+
+
+def item_to_dict(item: Item) -> ItemDict:
+    return {"title": item.title, "done": item.done}
+
+
+def load_checklist_from_savefile(savefile_path: Path) -> list[Item]:
+    checklist: list[Item] = []
+    with savefile_path.open("r", encoding="utf-8", newline="\n") as f:
+        deserialized = json.load(f)  # type: ignore
+        assert isinstance(deserialized, list)  # type: ignore
+
+        for thing in deserialized:
+            assert isinstance(thing, dict)
+            checklist.append(Item(done=thing["done"], title=thing["title"]))
+    return checklist
+
+
+def save_savefile(savefile_path: Path, checklist: list[Item]) -> None:
+    logger = logging.getLogger("save_savefile")
+
+    with savefile_path.open("w", encoding="utf-8", newline="\n") as f:
+        savefile_items: list[ItemDict] = []
+        for item in checklist:
+            savefile_items.append(item_to_dict(item))
+
+        json.dump(savefile_items, f, indent=4)
+
+    logger.debug(f"Written file '{savefile_path}'")
+
+
+def save_checklist(checklist: list[Item]) -> None:
+    logger = logging.getLogger("save_checklist")
+
+    filename = "checklist.txt"
+    with open(filename, "w", encoding="utf-8", newline="\n") as f:
+        f.write("=== CHECKLIST ===\n")
+
+        for item in checklist:
+            f.write(f"{item_to_string(item)}\n")
+
+    logger.debug(f"Written file '{filename}'")
+
+
+def add_command(checklist: list[Item], splitted_string: list[str]) -> None:
+    logger = logging.getLogger("add_command")
+
+    logger.debug("ADD COMMAND")
+    joined = " ".join(splitted_string)
+    logger.debug(f"rest: {joined!r}")
+    checklist.append(Item(done=False, title=joined))
+
+
+def get_index_from_command_argument(splitted_string: list[str]) -> int | None:
+    logger = logging.getLogger("get_index_from_command_argument")
+
+    try:
+        return int(splitted_string.pop(0), base=10)
+    except (
+        IndexError
+    ) as err:  # when pop() failed, either it's nothing, or out of bounds
+        logger.debug(f"IndexError: {err!r}")
+        logger.error("You didn't supply anything")
+        return None
+    except ValueError as err:  # when int() failed and the string isnt a number
+        logger.debug(f"ValueError: {err!r}")
+        logger.error("What you typed in isn't a number")
+        return None
+
+
+def actual_main(savefile_path: Path) -> None:
     logger = logging.getLogger("main")
 
-    checklist = []
+    if not savefile_path.exists():
+        logger.error(f"The path provided: '{savefile_path}' doesn't exist.")
+        return
 
-    if Path(checklistPath).exists():
-        with open(checklistPath, "r", encoding="utf-8") as f:
-            deserialized = json.load(f)
-
-            for thing in deserialized:
-                checklist.append(Item(done=thing["done"], title=thing["title"]))
+    checklist = load_checklist_from_savefile(savefile_path)
 
     # Loop
     while True:
-        for index, item in enumerate(checklist):
-            # TODO: maybe make a function that converts a item to string
-            if item.done:
-                mark = "x"
-            else:
-                mark = " "
-            print(f"{index}  [{mark}] {item.title}")
+        for pos, item in enumerate(checklist):
+            print(f"{pos:>2}  {item_to_string(item)}")
 
         # Read
         print()
         s = input("> ")
-        logger.info(repr(s))
+        logger.debug(repr(s))
 
         # Evaluate
         if s.strip() == "exit":
             break
 
-        lst = s.split()
-        popped = lst.pop(0)
+        # https://docs.python.org/3/library/stdtypes.html#str.split:~:text=the%20result%20will%20contain%20no%20empty%20strings%20at%20the%20start%20or%20end%20if%20the%20string%20has%20leading%20or%20trailing%20whitespace
+        # split() has a built-in strip()
+        splitted_string = s.split()
+        command = splitted_string.pop(0)
 
-        if popped == "add":
-            logger.info("ADD COMMAND")
-            joined = " ".join(lst)
-            checklist.append(Item(done=False, title=joined))
-            logger.info(f"rest: {repr(joined)}")
-        elif popped == "mark":
-            # what if the user didnt supply anything after mark, and or if it isnt an int
-            index = int(lst.pop(0))
+        if command == "add":
+            add_command(checklist, splitted_string)
+        elif command == "mark":
+            index = get_index_from_command_argument(splitted_string)
+            if index is None:
+                continue
+
+            if index >= len(checklist):
+                logger.error("The index is out of bounds")
+                continue
+
             checklist[index].done = True
-        elif popped == "delete":
-            # what if the user didnt supply anything after mark, and or if it isnt an int
-            index = int(lst.pop(0))
+
+        elif command == "delete":
+            index = get_index_from_command_argument(splitted_string)
+            if index is None:
+                continue
+
+            if index >= len(checklist):
+                logger.error("The index is out of bounds")
+                continue
+
             del checklist[index]
+
         else:
-            logger.error(f"ERROR: Unknown command '{popped}'")
+            logger.error(f"ERROR: Unknown command '{command}'")
             continue
 
         # Print
-        logger.info(repr(lst))
-        logger.info(f"Checklist: {repr(checklist)}")
+        logger.debug(f"splitted_string: {splitted_string!r}")
+        logger.debug(f"Checklist: {checklist!r}")
 
-        # Save the text file
-        filename = "checklist.txt"
-        with open(filename, "w", encoding="utf-8") as f:
-            f.write("=== CHECKLIST ===\n")
-
-            for item in checklist:
-                if item.done:
-                    mark = "x"
-                else:
-                    mark = " "
-
-                f.write(f"[{mark}] {item.title}\n")
-
-        logger.info(f"Written file '{filename}'")
-
-        with open(checklistPath, "w", encoding="utf-8") as f:
-            new_list = []
-            for item in checklist:
-                new_list.append(vars(item))
-
-            json.dump(new_list, f, indent=4)
+        save_checklist(checklist)
+        save_savefile(savefile_path, checklist)
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser()
 
     DEFAULT_LOGGING_LEVEL = "INFO"
@@ -115,13 +179,13 @@ def main():
         # this 'getattr' is the actual 'pythonic' way of doing it (as seen in https://docs.python.org/3/howto/logging.html#logging-to-a-file)
     )
     formatter = logging.Formatter(
-        "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        "%(levelname)s - %(name)s - %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
     console_handler.setFormatter(formatter)
     logger.addHandler(console_handler)
 
-    actual_main(args.checklist)
+    actual_main(args.checklist)  # type: ignore
 
 
 if __name__ == "__main__":
